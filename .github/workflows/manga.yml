@@ -7,8 +7,6 @@ on:
         description: 'Set to true to reset index to 1'
         required: false
         default: 'false'
-  schedule:
-    - cron: "0 */3 * * *"
 
 permissions:
   contents: write
