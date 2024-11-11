@@ -8,7 +8,6 @@ on:
 jobs:
   download_and_upload:
     runs-on: ubuntu-latest
-a Download and Upload
 
     steps:
       - name: Checkout repository
