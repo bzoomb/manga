@@ -7,8 +7,6 @@ on:
         description: 'Set to true to reset index to 1'
         required: false
         default: 'false'
-  schedule:
-    - cron: "0 1 * * *"  # Adjust the time if you want this to run at a different time than the 5-URL workflow
 
 permissions:
   contents: write
