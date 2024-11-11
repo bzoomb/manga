@@ -84,8 +84,8 @@ jobs:
 
       - name: Commit Updated Index
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@users.noreply.github.com"
+          git config --global user.name "bzoomb"
+          git config --global user.email "bzoomb1@gmail.com"
           git add last_index.txt
           git commit -m "Update last processed index to $(cat last_index.txt)"
           git push
