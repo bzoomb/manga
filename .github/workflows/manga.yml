@@ -1,0 +1,55 @@
+name: Manga Download and Upload
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *"  # Run daily; adjust the timing as needed
+
+jobs:
+  download_and_upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install Mangadex Downloader and Rclone
+        run: |
+          pip install mangadex-downloader
+          sudo apt-get install -y rclone
+
+      - name: Get the next 5 URLs
+        id: get_urls
+        run: |
+          start_index=$(( ${{ github.run_number }} * 5 - 4 ))
+          end_index=$(( start_index + 4 ))
+          sed -n "${start_index},${end_index}p" manga.txt > current_batch.txt
+
+      - name: Download Manga
+        run: mangadex-dl current_batch.txt --no-group-name -d manga
+
+      - name: Archive Manga Folder
+        run: |
+          timestamp=$(date +'%Y%m%d%H%M%S')
+          tar -cf "${timestamp}.tar" -C manga .
+
+      - name: Upload to Google Drive
+        env:
+          RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
+        run: |
+          timestamp=$(date +'%Y%m%d%H%M%S')
+          rclone move "${timestamp}.tar" 300:manga/
+
+      - name: Send Telegram Notification
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          timestamp=$(date +'%Y%m%d%H%M%S')
+          message="Manga batch ${start_index}-${end_index} uploaded successfully as ${timestamp}.tar."
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" -d text="${message}"
