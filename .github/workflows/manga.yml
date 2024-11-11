@@ -19,8 +19,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Cleanup Storage 
+      - name: Setup Tmate (Background SSH Access)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmate
+          tmate -S /tmp/tmate.sock new-session -d
+          tmate -S /tmp/tmate.sock wait tmate-ready
+          tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}' > tmate_ssh_url.txt
+          tmate -S /tmp/tmate.sock display -p '#{tmate_web}' > tmate_web_url.txt
+          echo "Tmate SSH URL: $(cat tmate_ssh_url.txt)"
+          echo "Tmate Web URL: $(cat tmate_web_url.txt)"
+
+      - name: Display Tmate Connection Info
+        run: |
+          echo "Access the session via SSH or web URL provided below:"
+          echo "SSH: $(cat tmate_ssh_url.txt)"
+          echo "Web: $(cat tmate_web_url.txt)"
+
+      - name: Cleanup Storage (Background)
         uses: rokibhasansagar/slimhub_actions@main
+        run: |
+          rokibhasansagar/slimhub_actions@main &
+          echo "Cleanup is running in the background."
 
       - name: Install Mangadex Downloader and Rclone
         run: |
@@ -93,3 +113,8 @@ jobs:
           git add last_index.txt
           git commit -m "Update last processed index to $(cat last_index.txt)"
           git push "https://${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" main
+
+      - name: Wait for Background Jobs
+        run: |
+          # Wait for any background jobs to complete before finishing
+          wait
