@@ -36,16 +36,6 @@ jobs:
           echo "SSH: $(cat tmate_ssh_url.txt)"
           echo "Web: $(cat tmate_web_url.txt)"
 
-      - name: Cleanup Storage (Background)
-        uses: rokibhasansagar/slimhub_actions@main
-        # Note: This step will only perform the cleanup task provided by slimhub_actions
-
-      - name: Retain Necessary Files (Manual Cleanup in Background)
-        run: |
-          # Retain `last_index.txt` and `manga` directory
-          find . -type f ! -name 'last_index.txt' ! -path './manga/*' -delete &
-          echo "Manual cleanup is running in the background, retaining last_index.txt and manga directory."
-
       - name: Install Mangadex Downloader and Rclone
         run: |
           pip install mangadex-downloader
@@ -59,53 +49,67 @@ jobs:
             echo "1" > last_index.txt
           elif [[ -f last_index.txt ]]; then
             last_index=$(cat last_index.txt)
-            echo "$((last_index + 5))" > last_index.txt
+            echo "$((last_index + 1))" > last_index.txt
           else
             echo "1" > last_index.txt
           fi
           echo "Starting index: $(cat last_index.txt)"
 
-      - name: Get the Next Batch of URLs
-        id: get_urls
+      - name: Get the Next URL
+        id: get_url
         run: |
-          start_index=$(cat last_index.txt)
-          end_index=$((start_index + 4))
-          echo "Fetching URLs from line ${start_index} to ${end_index}."
-          sed -n "${start_index},${end_index}p" manga.txt > current_batch.txt
-          if [[ ! -s current_batch.txt ]]; then
-            echo "No URLs found from lines ${start_index} to ${end_index}. Exiting."
+          current_index=$(cat last_index.txt)
+          echo "Fetching URL from line ${current_index}."
+          sed -n "${current_index}p" manga.txt > current_url.txt
+          if [[ ! -s current_url.txt ]]; then
+            echo "No URL found at line ${current_index}. Exiting."
             exit 0
           fi
-          echo "URLs to download:"
-          cat current_batch.txt
+          echo "URL to download:"
+          cat current_url.txt
 
-      - name: Download Manga in Parallel
+      - name: Download Manga
         run: |
-          # Download each URL in parallel using xargs
-          mangadex-dl current_batch.txt --no-group-name -d manga --progress-bar-layout=none -wti
+          # Download the manga from the single URL
+          mangadex-dl $(cat current_url.txt) --no-group-name -d manga --progress-bar-layout=none -wti
+
+      - name: Determine Folder Name
+        id: folder_name
+        run: |
+          # Retrieve the exact folder name created by mangadex-dl
+          manga_folder=$(ls manga)
+          echo "${manga_folder}" > folder_name.txt
+          
+          # Create a sanitized version for the archive name
+          sanitized_folder_name=$(echo "${manga_folder}" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+          echo "${sanitized_folder_name}" > archive_name.txt
+          echo "Folder name: ${manga_folder}, Archive name: ${sanitized_folder_name}"
 
       - name: Archive Manga Folder
         run: |
-          timestamp=$(date +'%Y%m%d%H%M%S')
-          tar -cf "${timestamp}.tar" -C manga .
-          echo "Archive created: ${timestamp}.tar"
+          # Use the exact folder name in the `tar` command, but sanitized name for the archive file
+          manga_folder=$(cat folder_name.txt)
+          archive_name=$(cat archive_name.txt)
+          tar -cf "${archive_name}.tar" -C manga "${manga_folder}"
+          echo "Archive created: ${archive_name}.tar"
 
       - name: Upload to Google Drive
         env:
           RCLONE_CONFIG_DATA: ${{ secrets.RCLONE_CONFIG }}
         run: |
           echo "${RCLONE_CONFIG_DATA}" > /tmp/rclone.conf
-          timestamp=$(date +'%Y%m%d%H%M%S')
-          rclone --config /tmp/rclone.conf move "${timestamp}.tar" 300:manga/
-          echo "Uploaded ${timestamp}.tar to Google Drive"
+          archive_name=$(cat archive_name.txt)
+          rclone --config /tmp/rclone.conf move "${archive_name}.tar" 300:manga/
+          echo "Uploaded ${archive_name}.tar to Google Drive"
 
       - name: Send Telegram Notification
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          start_index=$(cat last_index.txt)
-          message="Manga from index $((start_index - 4)) to ${start_index} uploaded successfully."
+          current_index=$(cat last_index.txt)
+          archive_name=$(cat archive_name.txt)
+          message="Manga '${archive_name}' from index ${current_index} uploaded successfully."
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" -d text="${message}"
 
       - name: Commit Updated Index
