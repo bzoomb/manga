@@ -65,11 +65,13 @@ jobs:
 
       - name: Upload to Google Drive
         env:
-          RCLONE_CONFIG: ${{ secrets.RCLONE_CONFIG }}
+          RCLONE_CONFIG_DATA: ${{ secrets.RCLONE_CONFIG }}
         run: |
+          # Write the RCLONE_CONFIG data to a temporary file
+          echo "${RCLONE_CONFIG_DATA}" > /tmp/rclone.conf
+          # Use the temporary config file for the rclone command
           timestamp=$(date +'%Y%m%d%H%M%S')
-          rclone move "${timestamp}.tar" 300:manga/
-          echo "Uploaded ${timestamp}.tar to Google Drive"
+          rclone --config /tmp/rclone.conf move "${timestamp}.tar" 300:manga/
 
       - name: Send Telegram Notification
         env:
