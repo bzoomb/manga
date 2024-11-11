@@ -82,7 +82,7 @@ jobs:
       - name: Download Manga in Parallel
         run: |
           # Download each URL in parallel using xargs
-          mangadex-dl current_batch.txt --no-group-name -d manga --progress-bar-layout=none -wti -f cbz
+          mangadex-dl current_batch.txt --no-group-name -d manga --progress-bar-layout=none -wti
 
       - name: Archive Manga Folder
         run: |
