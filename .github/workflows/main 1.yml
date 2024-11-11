@@ -1,4 +1,4 @@
-name: Manga Download and Upload 1
+name: Manga Download and Upload
 
 on:
   workflow_dispatch:
@@ -76,16 +76,25 @@ jobs:
       - name: Determine Folder Name
         id: folder_name
         run: |
-          # Find the folder name created by the mangadex-dl
+          # List all items in the `manga` directory to identify the folder name
+          ls -la manga
+          
+          # Find the exact folder name created by `mangadex-dl` (there should only be one folder)
           manga_folder=$(ls manga)
+          echo "${manga_folder}" > folder_name.txt
+          
+          # Sanitize the folder name for the archive (remove spaces, lowercase)
           sanitized_folder_name=$(echo "${manga_folder}" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
-          echo "Sanitized folder name: ${sanitized_folder_name}"
           echo "${sanitized_folder_name}" > archive_name.txt
+          echo "Detected folder name: '${manga_folder}', Sanitized archive name: '${sanitized_folder_name}'"
 
       - name: Archive Manga Folder
         run: |
+          # Use the exact folder name in the `tar` command and the sanitized name for the archive
+          manga_folder=$(cat folder_name.txt)
           archive_name=$(cat archive_name.txt)
-          tar -cf "${archive_name}.tar" -C manga "${archive_name}"
+          echo "Archiving folder '${manga_folder}' to '${archive_name}.tar'"
+          tar -cf "${archive_name}.tar" -C manga "${manga_folder}"
           echo "Archive created: ${archive_name}.tar"
 
       - name: Upload to Google Drive
