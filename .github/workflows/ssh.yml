@@ -1,0 +1,36 @@
+name: Tmate Session
+
+on:
+  workflow_dispatch: # Allows you to manually trigger the workflow from the GitHub Actions tab
+
+jobs:
+  tmate-session:
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout the repository so you can explore files and the GitHub Actions environment
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      # Install and start a tmate session
+      - name: Start Tmate session
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmate
+          # Create a new tmate session
+          tmate -S /tmp/tmate.sock new-session -d
+          tmate -S /tmp/tmate.sock wait tmate-ready
+          # Show SSH connection string and Web URL
+          tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}'
+          tmate -S /tmp/tmate.sock display -p '#{tmate_web}'
+
+      # Print connection details for the session to the GitHub Actions log
+      - name: Print Tmate session information
+        run: |
+          echo "Use the following SSH command to connect to this session:"
+          tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}'
+          echo "Or open this web URL in your browser to access the session:"
+          tmate -S /tmp/tmate.sock display -p '#{tmate_web}'
+
+      # Keep the session alive for a long time (adjust if needed)
+      - name: Keep Tmate session alive
+        run: sleep 3600
