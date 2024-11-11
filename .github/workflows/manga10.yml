@@ -1,4 +1,4 @@
-name: Manga Download and Upload 10
+name: Manga Download and Upload (10 URLs)
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ on:
         required: false
         default: 'false'
   schedule:
-    - cron: "0 0 * * *"
+    - cron: "0 1 * * *"  # Adjust the time if you want this to run at a different time than the 5-URL workflow
 
 permissions:
   contents: write
@@ -36,28 +36,28 @@ jobs:
         run: |
           if [[ "${{ github.event.inputs.reset_index }}" == "true" ]]; then
             echo "Resetting index to 1."
-            echo "1" > last_index10.txt
-          elif [[ -f last_index10.txt ]]; then
-            last_index=$(cat last_index10.txt)
-            echo "$((last_index + 10))" > last_index10.txt
+            echo "1" > last_index_10.txt
+          elif [[ -f last_index_10.txt ]]; then
+            last_index=$(cat last_index_10.txt)
+            echo "$((last_index + 10))" > last_index_10.txt
           else
-            echo "1" > last_index10.txt
+            echo "1" > last_index_10.txt
           fi
-          echo "Starting index: $(cat last_index10.txt)"
+          echo "Starting index: $(cat last_index_10.txt)"
 
-      - name: Get the Next Batch of URLs
+      - name: Get the Next Batch of 10 URLs
         id: get_urls
         run: |
-          start_index=$(cat last_index10.txt)
-          end_index=$((start_index + 9))  # Adjusted to fetch 10 lines
+          start_index=$(cat last_index_10.txt)
+          end_index=$((start_index + 9))  # Fetches 10 lines
           echo "Fetching URLs from line ${start_index} to ${end_index}."
-          sed -n "${start_index},${end_index}p" manga.txt > current_batch.txt
-          if [[ ! -s current_batch.txt ]]; then
+          sed -n "${start_index},${end_index}p" manga.txt > current_batch_10.txt
+          if [[ ! -s current_batch_10.txt ]]; then
             echo "No URLs found from lines ${start_index} to ${end_index}. Exiting."
             exit 0
           fi
           echo "URLs to download:"
-          cat current_batch.txt
+          cat current_batch_10.txt
 
       - name: Download Manga in Parallel
         run: |
@@ -84,7 +84,7 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          start_index=$(cat last_index10.txt)
+          start_index=$(cat last_index_10.txt)
           message="Manga from index $((start_index - 9)) to ${start_index} uploaded successfully."
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" -d text="${message}"
 
@@ -94,11 +94,11 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add last_index10.txt
-          git commit -m "Update last processed index to $(cat last_index10.txt)"
+          git add last_index_10.txt
+          git commit -m "Update last processed index for 10-URL workflow to $(cat last_index_10.txt)"
           git push "https://${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" main
 
       - name: Check Storage
         run: |
           du -sh -- * | sort -rh
-          df -h
+          df -h          
