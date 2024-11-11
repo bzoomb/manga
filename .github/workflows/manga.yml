@@ -55,7 +55,7 @@ jobs:
           echo "URL to download: $(cat current_batch.txt)"
 
       - name: Download Manga
-        run: mangadex-dl current_batch.txt --no-group-name -d manga
+        run: mangadex-dl current_batch.txt --no-group-name -d manga -f cbz --progress-bar-layout=none
 
       - name: Archive Manga Folder
         run: |
