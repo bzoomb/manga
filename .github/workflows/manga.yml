@@ -8,7 +8,7 @@ on:
         required: false
         default: 'false'
   schedule:
-    - cron: "0 0 * * *"  # Run daily; adjust timing as needed
+    - cron: "0 0 * * *"
 
 jobs:
   download_and_upload:
@@ -32,6 +32,7 @@ jobs:
         id: determine_index
         run: |
           if [[ "${{ github.event.inputs.reset_index }}" == "true" ]]; then
+            echo "Resetting index to 1."
             echo "1" > last_index.txt
           elif [[ -f last_index.txt ]]; then
             last_index=$(cat last_index.txt)
@@ -39,22 +40,28 @@ jobs:
           else
             echo "1" > last_index.txt
           fi
-          cat last_index.txt
+          echo "Starting index: $(cat last_index.txt)"
 
       - name: Get the Next URL
         id: get_url
         run: |
           start_index=$(cat last_index.txt)
+          echo "Fetching URL at line ${start_index}."
           sed -n "${start_index}p" manga.txt > current_batch.txt
+          if [[ ! -s current_batch.txt ]]; then
+            echo "No URL found at line ${start_index}. Exiting."
+            exit 0
+          fi
+          echo "URL to download: $(cat current_batch.txt)"
 
       - name: Download Manga
-        if: success() && steps.get_url.outputs.start_index != ''
         run: mangadex-dl current_batch.txt --no-group-name -d manga
 
       - name: Archive Manga Folder
         run: |
           timestamp=$(date +'%Y%m%d%H%M%S')
           tar -cf "${timestamp}.tar" -C manga .
+          echo "Archive created: ${timestamp}.tar"
 
       - name: Upload to Google Drive
         env:
@@ -62,6 +69,7 @@ jobs:
         run: |
           timestamp=$(date +'%Y%m%d%H%M%S')
           rclone move "${timestamp}.tar" 300:manga/
+          echo "Uploaded ${timestamp}.tar to Google Drive"
 
       - name: Send Telegram Notification
         env:
