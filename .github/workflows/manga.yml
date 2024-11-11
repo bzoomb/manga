@@ -9,7 +9,7 @@ jobs:
   download_and_upload:
     runs-on: ubuntu-latest
 a Download and Upload
-manga.y
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
