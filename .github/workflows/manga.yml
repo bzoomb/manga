@@ -31,7 +31,7 @@ jobs:
           sed -n "${start_index},${end_index}p" manga.txt > current_batch.txt
 
       - name: Download Manga
-        run: mangadex-dl current_batch.txt --no-group-name -d manga -f cbz --progress-bar-layout=none -wti
+        run: mangadex-dl current_batch.txt --no-group-name -d manga -f cbz --progress-bar-layout=none
 
       - name: Archive Manga Folder
         run: |
