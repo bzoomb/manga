@@ -38,9 +38,13 @@ jobs:
 
       - name: Cleanup Storage (Background)
         uses: rokibhasansagar/slimhub_actions@main
+        # Note: This step will only perform the cleanup task provided by slimhub_actions
+
+      - name: Retain Necessary Files (Manual Cleanup in Background)
         run: |
-          rokibhasansagar/slimhub_actions@main &
-          echo "Cleanup is running in the background."
+          # Retain `last_index.txt` and `manga` directory
+          find . -type f ! -name 'last_index.txt' ! -path './manga/*' -delete &
+          echo "Manual cleanup is running in the background, retaining last_index.txt and manga directory."
 
       - name: Install Mangadex Downloader and Rclone
         run: |
