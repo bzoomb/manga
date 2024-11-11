@@ -22,11 +22,6 @@ jobs:
       - name: Cleanup Storage 
         uses: rokibhasansagar/slimhub_actions@main
 
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.x'
-
       - name: Install Mangadex Downloader and Rclone
         run: |
           pip install mangadex-downloader
