@@ -97,3 +97,8 @@ jobs:
           git add last_index10.txt
           git commit -m "Update last processed index to $(cat last_index10.txt)"
           git push "https://${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" main
+
+      - name: Check Storage
+        run: |
+          du -sh -- * | sort -rh
+          df -h
