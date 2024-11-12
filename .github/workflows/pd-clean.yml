@@ -1,4 +1,4 @@
-name: pd
+name: pd clean
 
 on:
   workflow_dispatch:
@@ -11,6 +11,16 @@ on:
         description: 'Set to true to reset index to 1'
         required: false
         default: 'false'
+        options:
+          - true
+          - false
+      make_custom_last:
+        description: 'Set to true to make custom index the last index'
+        required: false
+        default: 'false'
+        options:
+          - true
+          - false
 
 permissions:
   contents: write
@@ -36,7 +46,13 @@ jobs:
         run: |
           if [[ -n "${{ github.event.inputs.custom_index }}" ]]; then
             echo "Using custom index: ${{ github.event.inputs.custom_index }}"
-            echo "${{ github.event.inputs.custom_index }}" > last_index.txt
+            if [[ "${{ github.event.inputs.make_custom_last }}" == "true" ]]; then
+              echo "${{ github.event.inputs.custom_index }}" > last_index.txt
+              echo "Custom index set as last index."
+            else
+              echo "${{ github.event.inputs.custom_index }}" > current_index.txt
+              echo "Custom index set for this run only."
+            fi
           elif [[ "${{ github.event.inputs.reset_index }}" == "true" ]]; then
             echo "Resetting index to 1."
             echo "1" > last_index.txt
@@ -51,7 +67,11 @@ jobs:
       - name: Get the Next URL
         id: get_url
         run: |
-          current_index=$(cat last_index.txt)
+          if [[ -f current_index.txt ]]; then
+            current_index=$(cat current_index.txt)
+          else
+            current_index=$(cat last_index.txt)
+          fi
           echo "Fetching URL from line ${current_index}."
           sed -n "${current_index}p" manga.txt > current_url.txt
           if [[ ! -s current_url.txt ]]; then
@@ -71,11 +91,11 @@ jobs:
         run: |
           # List all items in the `manga` directory to identify the folder name
           ls -la manga
-          
+
           # Find the exact folder name created by `mangadex-dl` (there should only be one folder)
           manga_folder=$(ls manga)
           echo "${manga_folder}" > folder_name.txt
-          
+
           # Sanitize the folder name for the archive (remove spaces, lowercase)
           sanitized_folder_name=$(echo "${manga_folder}" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
           echo "${sanitized_folder_name}" > archive_name.txt
@@ -101,7 +121,7 @@ jobs:
               echo "https://pixeldrain.com/u/$ID" > upload_link.txt
               echo "https://pd.cybar.xyz/$ID" > custom_upload_link.txt
           }
-          
+
           # Run the pdup function with the archive file
           archive_name=$(cat archive_name.txt)
           pdup "${archive_name}.tar"
@@ -122,14 +142,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add last_index.txt
-          git commit -m "Update last processed index to $(cat last_index.txt)"
-          git push "https://${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" main
+          if [[ -f current_index.txt ]]; then
+            echo "Custom index was used for this run. Not updating last_index.txt."
+          else
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "github-actions[bot]@users.noreply.github.com"
+            git add last_index.txt
+            git diff --quiet && git diff --staged --quiet || (git commit -m "Update last processed index to $(cat last_index.txt)" && git push "https://${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" main)
+          fi
 
       - name: Wait for Background Jobs
         run: |
           # Wait for any background jobs to complete before finishing
-          wait
-          
+          wait 
