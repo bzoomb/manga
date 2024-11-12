@@ -131,7 +131,7 @@ jobs:
           if ! pdup "${archive_name}.tar"; then
             exit 1
           fi
-
+          
       - name: Send Telegram Notification
         if: steps.get_url.outputs.workflow_complete != 'true'
         env:
@@ -143,8 +143,8 @@ jobs:
           upload_link=$(cat upload_link.txt)
           custom_upload_link=$(cat custom_upload_link.txt)
           file_size=$(du -h "${archive_name}.tar" | cut -f1)
-          message="Manga '${archive_name}' (${file_size}) from index ${current_index} uploaded successfully.\n\nDownload links:\n1. ${upload_link}\n2. ${custom_upload_link}"
-          if ! curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" -d text="${message}"; then
+          message="🎉 Manga Upload Successful! 🎉\n\n📚 Title: ${archive_name}\n📊 Size: ${file_size}\n🔢 Index: ${current_index}\n\n📥 Download Links:\n1️⃣ PixelDrain: ${upload_link}\n2️⃣ Custom: ${custom_upload_link}"
+          if ! curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" -d text="${message}" -d parse_mode="HTML"; then
             echo "Error: Failed to send Telegram notification"
             exit 1
           fi
@@ -164,10 +164,15 @@ jobs:
             mv next_index.txt last_index.txt
           fi
           git add last_index.txt
-          git commit -m "Update last processed index to $(cat last_index.txt)"
-          if ! git push; then
-            echo "Error: Failed to push changes"
-            exit 1
+          git status
+          if git diff --staged --quiet; then
+            echo "No changes to commit in last_index.txt"
+          else
+            git commit -m "Update last processed index to $(cat last_index.txt)"
+            if ! git push; then
+              echo "Error: Failed to push changes"
+              exit 1
+            fi
           fi
 
       - name: Check for Workflow Completion
