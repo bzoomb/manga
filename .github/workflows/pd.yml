@@ -4,20 +4,22 @@ on:
   workflow_dispatch:
     inputs:
       custom_index:
-        description: 'Specify a custom index number to start from (leave blank to use last index)'
+        description: 'Specify a custom index number (leave blank to use last index)'
         required: false
         default: ''
-      reset_index:
-        description: 'Set to true to reset index to 1'
+      set_custom_as_last:
+        description: 'Set custom index as the last index'
+        type: boolean
         required: false
-        default: 'false'
+        default: false
+      reset_index:
+        description: 'Reset index to 1'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
-
-env:
-  MAX_RETRIES: 3
-  RETRY_DELAY: 60
 
 jobs:
   download_and_upload:
@@ -38,6 +40,11 @@ jobs:
           if [[ -n "${{ github.event.inputs.custom_index }}" ]]; then
             echo "Using custom index: ${{ github.event.inputs.custom_index }}"
             echo "${{ github.event.inputs.custom_index }}" > last_index.txt
+            if [[ "${{ github.event.inputs.set_custom_as_last }}" == "true" ]]; then
+              echo "Setting custom index as the last index"
+            else
+              echo "$(({{ github.event.inputs.custom_index }} + 1))" > next_index.txt
+            fi
           elif [[ "${{ github.event.inputs.reset_index }}" == "true" ]]; then
             echo "Resetting index to 1."
             echo "1" > last_index.txt
@@ -70,21 +77,10 @@ jobs:
       - name: Download Manga
         if: steps.get_url.outputs.workflow_complete != 'true'
         run: |
-          for i in $(seq 1 $MAX_RETRIES); do
-            if mangadex-dl $(cat current_url.txt) --no-group-name -d manga --progress-bar-layout=none -wti; then
-              echo "Download successful"
-              break
-            else
-              echo "Download failed, attempt $i of $MAX_RETRIES"
-              if [ $i -lt $MAX_RETRIES ]; then
-                echo "Retrying in $RETRY_DELAY seconds..."
-                sleep $RETRY_DELAY
-              else
-                echo "Max retries reached. Exiting."
-                exit 1
-              fi
-            fi
-          done
+          if ! mangadex-dl $(cat current_url.txt) --no-group-name -d manga --progress-bar-layout=none -wti; then
+            echo "Error: Failed to download manga"
+            exit 1
+          fi
 
       - name: Determine Folder Name
         if: steps.get_url.outputs.workflow_complete != 'true'
@@ -113,19 +109,6 @@ jobs:
           fi
           echo "Archive created: ${archive_name}.tar"
 
-      - name: Check File Size
-        if: steps.get_url.outputs.workflow_complete != 'true'
-        id: check_size
-        run: |
-          archive_name=$(cat archive_name.txt)
-          file_size=$(du -m "${archive_name}.tar" | cut -f1)
-          echo "Archive size: ${file_size} MB"
-          if [ ${file_size} -gt 10000 ]; then
-            echo "Error: File size exceeds 10GB limit"
-            exit 1
-          fi
-          echo "file_size=${file_size}" >> $GITHUB_OUTPUT
-
       - name: Upload to PixelDrain
         if: steps.get_url.outputs.workflow_complete != 'true'
         env:
@@ -133,28 +116,19 @@ jobs:
         run: |
           pdup() {
             [ -z "$1" ] && echo "Error: File not specified!" && return 1
-            for i in $(seq 1 $MAX_RETRIES); do
-              ID=$(curl --progress-bar -T "$1" -u :${PIXELDRAIN_API} https://pixeldrain.com/api/file/ | grep -Po '(?<="id":")[^"]*')
-              if [ -n "$ID" ]; then
-                echo "https://pixeldrain.com/u/$ID" > upload_link.txt
-                echo "https://pd.cybar.xyz/$ID" > custom_upload_link.txt
-                return 0
-              else
-                echo "Upload failed, attempt $i of $MAX_RETRIES"
-                if [ $i -lt $MAX_RETRIES ]; then
-                  echo "Retrying in $RETRY_DELAY seconds..."
-                  sleep $RETRY_DELAY
-                else
-                  echo "Max retries reached. Exiting."
-                  return 1
-                fi
-              fi
-            done
+            ID=$(curl --progress-bar -T "$1" -u :${PIXELDRAIN_API} https://pixeldrain.com/api/file/ | grep -Po '(?<="id":")[^"]*')
+            if [ -n "$ID" ]; then
+              echo "https://pixeldrain.com/u/$ID" > upload_link.txt
+              echo "https://pd.cybar.xyz/$ID" > custom_upload_link.txt
+              return 0
+            else
+              echo "Error: Failed to upload file to PixelDrain"
+              return 1
+            fi
           }
           
           archive_name=$(cat archive_name.txt)
           if ! pdup "${archive_name}.tar"; then
-            echo "Error: Failed to upload file to PixelDrain"
             exit 1
           fi
 
@@ -186,6 +160,9 @@ jobs:
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          if [[ -f next_index.txt ]]; then
+            mv next_index.txt last_index.txt
+          fi
           git add last_index.txt
           git commit -m "Update last processed index to $(cat last_index.txt)"
           if ! git push; then
