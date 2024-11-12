@@ -29,8 +29,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install mangadex-downloader==2.8.6
-          sudo apt-get update && sudo apt-get install -y rclone=1.55.1-1ubuntu1.1
+          pip install mangadex-downloader
+          sudo apt-get install -y rclone
 
       - name: Determine Starting Index
         id: determine_index
