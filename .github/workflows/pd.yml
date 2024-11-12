@@ -1,4 +1,4 @@
-name: pd
+name: Manga Download and Upload
 
 on:
   workflow_dispatch:
@@ -15,6 +15,10 @@ on:
 permissions:
   contents: write
 
+env:
+  MAX_RETRIES: 3
+  RETRY_DELAY: 60
+
 jobs:
   download_and_upload:
     runs-on: ubuntu-latest
@@ -23,10 +27,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Install Mangadex Downloader and Rclone
+      - name: Install dependencies
         run: |
-          pip install mangadex-downloader
-          sudo apt-get install -y rclone
+          pip install mangadex-downloader==2.8.6
+          sudo apt-get update && sudo apt-get install -y rclone=1.55.1-1ubuntu1.1
 
       - name: Determine Starting Index
         id: determine_index
@@ -43,67 +47,119 @@ jobs:
           else
             echo "1" > last_index.txt
           fi
-          echo "Starting index: $(cat last_index.txt)"
+          echo "starting_index=$(cat last_index.txt)" >> $GITHUB_OUTPUT
 
       - name: Get the Next URL
         id: get_url
         run: |
           current_index=$(cat last_index.txt)
           echo "Fetching URL from line ${current_index}."
-          sed -n "${current_index}p" manga.txt > current_url.txt
+          if ! sed -n "${current_index}p" manga.txt > current_url.txt; then
+            echo "Error: Failed to read URL from manga.txt"
+            exit 1
+          fi
           if [[ ! -s current_url.txt ]]; then
-            echo "No URL found at line ${current_index}. Exiting."
+            echo "No URL found at line ${current_index}. Workflow complete."
+            echo "workflow_complete=true" >> $GITHUB_OUTPUT
             exit 0
           fi
           echo "URL to download:"
           cat current_url.txt
+          echo "manga_url=$(cat current_url.txt)" >> $GITHUB_OUTPUT
 
       - name: Download Manga
+        if: steps.get_url.outputs.workflow_complete != 'true'
         run: |
-          # Download the manga from the single URL
-          mangadex-dl $(cat current_url.txt) --no-group-name -d manga --progress-bar-layout=none -wti
+          for i in $(seq 1 $MAX_RETRIES); do
+            if mangadex-dl $(cat current_url.txt) --no-group-name -d manga --progress-bar-layout=none -wti; then
+              echo "Download successful"
+              break
+            else
+              echo "Download failed, attempt $i of $MAX_RETRIES"
+              if [ $i -lt $MAX_RETRIES ]; then
+                echo "Retrying in $RETRY_DELAY seconds..."
+                sleep $RETRY_DELAY
+              else
+                echo "Max retries reached. Exiting."
+                exit 1
+              fi
+            fi
+          done
 
       - name: Determine Folder Name
+        if: steps.get_url.outputs.workflow_complete != 'true'
         id: folder_name
         run: |
-          # List all items in the `manga` directory to identify the folder name
-          ls -la manga
-          
-          # Find the exact folder name created by `mangadex-dl` (there should only be one folder)
           manga_folder=$(ls manga)
+          if [ -z "$manga_folder" ]; then
+            echo "Error: No manga folder found"
+            exit 1
+          fi
           echo "${manga_folder}" > folder_name.txt
-          
-          # Sanitize the folder name for the archive (remove spaces, lowercase)
           sanitized_folder_name=$(echo "${manga_folder}" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
           echo "${sanitized_folder_name}" > archive_name.txt
-          echo "Detected folder name: '${manga_folder}', Sanitized archive name: '${sanitized_folder_name}'"
+          echo "manga_folder=${manga_folder}" >> $GITHUB_OUTPUT
+          echo "archive_name=${sanitized_folder_name}" >> $GITHUB_OUTPUT
 
       - name: Archive Manga Folder
+        if: steps.get_url.outputs.workflow_complete != 'true'
         run: |
-          # Use the exact folder name in the `tar` command and the sanitized name for the archive
           manga_folder=$(cat folder_name.txt)
           archive_name=$(cat archive_name.txt)
           echo "Archiving folder '${manga_folder}' to '${archive_name}.tar'"
-          tar -cf "${archive_name}.tar" -C manga "${manga_folder}"
+          if ! tar -cf "${archive_name}.tar" -C manga "${manga_folder}"; then
+            echo "Error: Failed to create archive"
+            exit 1
+          fi
           echo "Archive created: ${archive_name}.tar"
 
-      - name: Upload to PixelDrain
-        env:
-          PIXELDRAIN_API: 0363d8ae-9303-4d7e-8fee-f5f09a4be198
+      - name: Check File Size
+        if: steps.get_url.outputs.workflow_complete != 'true'
+        id: check_size
         run: |
-          # Define the pdup function to upload to PixelDrain and output two URL formats
+          archive_name=$(cat archive_name.txt)
+          file_size=$(du -m "${archive_name}.tar" | cut -f1)
+          echo "Archive size: ${file_size} MB"
+          if [ ${file_size} -gt 10000 ]; then
+            echo "Error: File size exceeds 10GB limit"
+            exit 1
+          fi
+          echo "file_size=${file_size}" >> $GITHUB_OUTPUT
+
+      - name: Upload to PixelDrain
+        if: steps.get_url.outputs.workflow_complete != 'true'
+        env:
+          PIXELDRAIN_API: ${{ secrets.PIXELDRAIN_API }}
+        run: |
           pdup() {
-              [ -z "$1" ] && echo "Error: File not specified!" && return
+            [ -z "$1" ] && echo "Error: File not specified!" && return 1
+            for i in $(seq 1 $MAX_RETRIES); do
               ID=$(curl --progress-bar -T "$1" -u :${PIXELDRAIN_API} https://pixeldrain.com/api/file/ | grep -Po '(?<="id":")[^"]*')
-              echo "https://pixeldrain.com/u/$ID" > upload_link.txt
-              echo "https://pd.cybar.xyz/$ID" > custom_upload_link.txt
+              if [ -n "$ID" ]; then
+                echo "https://pixeldrain.com/u/$ID" > upload_link.txt
+                echo "https://pd.cybar.xyz/$ID" > custom_upload_link.txt
+                return 0
+              else
+                echo "Upload failed, attempt $i of $MAX_RETRIES"
+                if [ $i -lt $MAX_RETRIES ]; then
+                  echo "Retrying in $RETRY_DELAY seconds..."
+                  sleep $RETRY_DELAY
+                else
+                  echo "Max retries reached. Exiting."
+                  return 1
+                fi
+              fi
+            done
           }
           
-          # Run the pdup function with the archive file
           archive_name=$(cat archive_name.txt)
-          pdup "${archive_name}.tar"
+          if ! pdup "${archive_name}.tar"; then
+            echo "Error: Failed to upload file to PixelDrain"
+            exit 1
+          fi
 
       - name: Send Telegram Notification
+        if: steps.get_url.outputs.workflow_complete != 'true'
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -112,21 +168,32 @@ jobs:
           archive_name=$(cat archive_name.txt)
           upload_link=$(cat upload_link.txt)
           custom_upload_link=$(cat custom_upload_link.txt)
-          message="Manga '${archive_name}' from index ${current_index} uploaded successfully.\n\nDownload links:\n1. ${upload_link}\n2. ${custom_upload_link}"
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" -d text="${message}"
+          file_size=$(du -h "${archive_name}.tar" | cut -f1)
+          message="Manga '${archive_name}' (${file_size}) from index ${current_index} uploaded successfully.\n\nDownload links:\n1. ${upload_link}\n2. ${custom_upload_link}"
+          if ! curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" -d text="${message}"; then
+            echo "Error: Failed to send Telegram notification"
+            exit 1
+          fi
 
-      - name: Commit Updated Index
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -rf manga
+          rm -f *.tar
+
+      - name: Update Index
+        if: steps.get_url.outputs.workflow_complete != 'true'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add last_index.txt
           git commit -m "Update last processed index to $(cat last_index.txt)"
-          git push "https://${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" main
+          if ! git push; then
+            echo "Error: Failed to push changes"
+            exit 1
+          fi
 
-      - name: Wait for Background Jobs
+      - name: Check for Workflow Completion
+        if: steps.get_url.outputs.workflow_complete == 'true'
         run: |
-          # Wait for any background jobs to complete before finishing
-          wait
-          
+          echo "Workflow complete. All URLs processed."
