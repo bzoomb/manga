@@ -1,0 +1,129 @@
+name: custom
+
+on:
+  workflow_dispatch:
+    inputs:
+      index_range:
+        description: 'Specify index range (e.g., 3-13) or leave blank for last index'
+        required: false
+        default: ''
+        
+permissions:
+  contents: write
+
+jobs:
+  download_and_upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Install dependencies
+        run: |
+          pip install mangadex-downloader
+          sudo apt-get install -y rclone
+
+      - name: Determine Starting Index
+        id: determine_index
+        run: |
+          if [[ -n "${{ github.event.inputs.index_range }}" ]]; then
+            IFS='-' read -ra RANGE <<< "${{ github.event.inputs.index_range }}"
+            START_INDEX=${RANGE[0]}
+            END_INDEX=${RANGE[1]}
+            echo "start_index=${START_INDEX}" >> $GITHUB_OUTPUT
+            echo "end_index=${END_INDEX}" >> $GITHUB_OUTPUT
+          elif [[ -f last_index.txt ]]; then
+            last_index=$(cat last_index.txt)
+            echo "start_index=$((last_index + 1))" >> $GITHUB_OUTPUT
+            echo "end_index=$((last_index + 1))" >> $GITHUB_OUTPUT
+          else
+            echo "start_index=1" >> $GITHUB_OUTPUT
+            echo "end_index=1" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get URLs
+        id: get_urls
+        run: |
+          start_index=${{ steps.determine_index.outputs.start_index }}
+          end_index=${{ steps.determine_index.outputs.end_index }}
+          urls=()
+          for ((i=start_index; i<=end_index; i++)); do
+            url=$(sed -n "${i}p" manga.txt)
+            if [[ -z "$url" ]]; then
+              echo "No URL found at line ${i}. Stopping."
+              break
+            fi
+            urls+=("$url")
+          done
+          if [[ ${#urls[@]} -eq 0 ]]; then
+            echo "workflow_complete=true" >> $GITHUB_OUTPUT
+          else
+            echo "urls=${urls[*]}" >> $GITHUB_OUTPUT
+          fi
+
+      
+      - name: Process Manga URLs
+        if: steps.get_urls.outputs.workflow_complete != 'true'
+        run: |
+          IFS=' ' read -ra URLS <<< "${{ steps.get_urls.outputs.urls }}"
+          for url in "${URLS[@]}"; do
+            echo "Processing URL: $url"
+            
+            # Download Manga
+            mangadex-dl "$url" --no-group-name -d manga --progress-bar-layout=none -wti
+      
+            # Determine Folder Name
+            manga_folder=$(ls manga)
+            if [ -z "$manga_folder" ]; then
+              echo "Error: No manga folder found for $url"
+              continue
+            fi
+            sanitized_folder_name=$(echo "${manga_folder}" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+            
+            # Archive Manga Folder
+            echo "Archiving folder '${manga_folder}' to '${sanitized_folder_name}.tar'"
+            if ! tar -cf "${sanitized_folder_name}.tar" -C manga "${manga_folder}"; then
+              echo "Error: Failed to create archive for $url"
+              continue
+            fi
+            
+            # Upload to PixelDrain
+            ID=$(curl --progress-bar -T "${sanitized_folder_name}.tar" -u :${PIXELDRAIN_API} https://pixeldrain.com/api/file/ | grep -Po '(?<="id":")[^"]*')
+            if [ -n "$ID" ]; then
+              echo "https://pixeldrain.com/u/$ID" >> upload_links.txt
+              echo "https://pd.cybar.xyz/$ID" >> custom_upload_links.txt
+            else
+              echo "Error: Failed to upload file to PixelDrain for $url"
+            fi
+            
+            # Cleanup
+            rm -rf manga
+            rm -f "${sanitized_folder_name}.tar"
+          done
+      
+      - name: Send Telegram Notification
+        if: steps.get_urls.outputs.workflow_complete != 'true'
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          message="🎉 Manga Upload Successful! 🎉\n\n"
+          while IFS= read -r link; do
+            message+="📥 PixelDrain: $link\n"
+          done < upload_links.txt
+          while IFS= read -r link; do
+            message+="📥 Custom: $link\n"
+          done < custom_upload_links.txt
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" -d text="${message}" -d parse_mode="HTML"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -rf manga
+          rm -f *.tar
+
+      - name: Check for Workflow Completion
+        if: steps.get_url.outputs.workflow_complete == 'true'
+        run: |
+          echo "Workflow complete. All URLs processed."
