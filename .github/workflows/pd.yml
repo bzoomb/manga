@@ -23,23 +23,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      - name: Setup Tmate (Background SSH Access)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y tmate
-          tmate -S /tmp/tmate.sock new-session -d
-          tmate -S /tmp/tmate.sock wait tmate-ready
-          tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}' > tmate_ssh_url.txt
-          tmate -S /tmp/tmate.sock display -p '#{tmate_web}' > tmate_web_url.txt
-          echo "Tmate SSH URL: $(cat tmate_ssh_url.txt)"
-          echo "Tmate Web URL: $(cat tmate_web_url.txt)"
-
-      - name: Display Tmate Connection Info
-        run: |
-          echo "Access the session via SSH or web URL provided below:"
-          echo "SSH: $(cat tmate_ssh_url.txt)"
-          echo "Web: $(cat tmate_web_url.txt)"
-
       - name: Install Mangadex Downloader and Rclone
         run: |
           pip install mangadex-downloader
