@@ -77,10 +77,8 @@ jobs:
       - name: Download Manga
         if: steps.get_url.outputs.workflow_complete != 'true'
         run: |
-          if ! mangadex-dl $(cat current_url.txt) --no-group-name -d manga --progress-bar-layout=none -wti; then
-            echo "Error: Failed to download manga"
-            exit 1
-          fi
+          mangadex-dl $(cat current_url.txt) --no-group-name -d manga --progress-bar-layout=none -wti
+
 
       - name: Determine Folder Name
         if: steps.get_url.outputs.workflow_complete != 'true'
