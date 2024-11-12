@@ -8,16 +8,43 @@ on:
 
 jobs:
   check-and-trigger:
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}  # Only run if last run was successful
     runs-on: ubuntu-latest
 
     steps:
-      - name: Trigger 'pd' Workflow
+      - name: Check workflow conclusion and logs
         env:
-          GITHUB_TOKEN: ${{ secrets.TOKEN }}  # Use the secret
+          GITHUB_TOKEN: ${{ secrets.TOKEN }}
         run: |
-          curl -X POST -H "Authorization: token $GITHUB_TOKEN" \
-          -H "Accept: application/vnd.github.v3+json" \
-          https://api.github.com/repos/bzoomb/manga/actions/workflows/pd.yml/dispatches \
-          -d '{"ref":"main"}'
+          # Get the workflow run ID
+          RUN_ID=${{ github.event.workflow_run.id }}
           
+          # Check the conclusion
+          CONCLUSION=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/runs/$RUN_ID" \
+            | jq -r .conclusion)
+          
+          # If the workflow failed, check the logs for disk space error
+          if [ "$CONCLUSION" = "failure" ]; then
+            LOGS=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/runs/$RUN_ID/logs")
+            
+            if echo "$LOGS" | grep -q "no space left on device"; then
+              echo "Disk space error detected. Triggering pd-clean.yml"
+              WORKFLOW_TO_RUN="pd-clean.yml"
+            else
+              echo "Workflow failed, but not due to disk space. Not triggering any workflow."
+              exit 0
+            fi
+          elif [ "$CONCLUSION" = "success" ]; then
+            echo "Workflow succeeded. Triggering pd.yml"
+            WORKFLOW_TO_RUN="pd.yml"
+          else
+            echo "Unexpected conclusion: $CONCLUSION. Not triggering any workflow."
+            exit 0
+          fi
+          
+          # Trigger the appropriate workflow
+          curl -X POST -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/$WORKFLOW_TO_RUN/dispatches" \
+            -d '{"ref":"main"}'
