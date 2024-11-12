@@ -98,10 +98,19 @@ jobs:
           echo "Archive created: ${archive_name}.tar"
 
       - name: Upload to PixelDrain
+        env:
+          PIXELDRAIN_API: 0363d8ae-9303-4d7e-8fee-f5f09a4be198
         run: |
+          # Define the pdup function
+          pdup() {
+              [ -z "$1" ] && echo "Error: File not specified!" && return
+              ID=$(curl --progress-bar -T "$1" -u :${PIXELDRAIN_API} https://pixeldrain.com/api/file/ | grep -Po '(?<="id":")[^"]*')
+              echo "https://pixeldrain.com/api/file/$ID?download"
+          }
+          
+          # Run the pdup function with the archive file and capture the output URL
           archive_name=$(cat archive_name.txt)
-          upload_response=$(curl -s -F "file=@${archive_name}.tar" -F "apikey=0363d8ae-9303-4d7e-8fee-f5f09a4be198" https://pixeldrain.com/api/file)
-          upload_link="https://pixeldrain.com/u/$(echo $upload_response | jq -r '.id')"
+          upload_link=$(pdup "${archive_name}.tar")
           echo "Uploaded ${archive_name}.tar to PixelDrain: ${upload_link}"
           echo "${upload_link}" > upload_link.txt
 
