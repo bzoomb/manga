@@ -1,0 +1,135 @@
+name: pd
+
+on:
+  workflow_dispatch:
+    inputs:
+      custom_index:
+        description: 'Specify a custom index number to start from (leave blank to use last index)'
+        required: false
+        default: ''
+      reset_index:
+        description: 'Set to true to reset index to 1'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  download_and_upload:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Cleanup
+        uses: rokibhasansagar/slimhub_actions@main
+
+      - name: Install Mangadex Downloader and Rclone
+        run: |
+          pip install mangadex-downloader
+          sudo apt-get install -y rclone
+
+      - name: Determine Starting Index
+        id: determine_index
+        run: |
+          if [[ -n "${{ github.event.inputs.custom_index }}" ]]; then
+            echo "Using custom index: ${{ github.event.inputs.custom_index }}"
+            echo "${{ github.event.inputs.custom_index }}" > last_index.txt
+          elif [[ "${{ github.event.inputs.reset_index }}" == "true" ]]; then
+            echo "Resetting index to 1."
+            echo "1" > last_index.txt
+          elif [[ -f last_index.txt ]]; then
+            last_index=$(cat last_index.txt)
+            echo "$((last_index + 1))" > last_index.txt
+          else
+            echo "1" > last_index.txt
+          fi
+          echo "Starting index: $(cat last_index.txt)"
+
+      - name: Get the Next URL
+        id: get_url
+        run: |
+          current_index=$(cat last_index.txt)
+          echo "Fetching URL from line ${current_index}."
+          sed -n "${current_index}p" manga.txt > current_url.txt
+          if [[ ! -s current_url.txt ]]; then
+            echo "No URL found at line ${current_index}. Exiting."
+            exit 0
+          fi
+          echo "URL to download:"
+          cat current_url.txt
+
+      - name: Download Manga
+        run: |
+          # Download the manga from the single URL
+          mangadex-dl $(cat current_url.txt) --no-group-name -d manga --progress-bar-layout=none -wti
+
+      - name: Determine Folder Name
+        id: folder_name
+        run: |
+          # List all items in the `manga` directory to identify the folder name
+          ls -la manga
+          
+          # Find the exact folder name created by `mangadex-dl` (there should only be one folder)
+          manga_folder=$(ls manga)
+          echo "${manga_folder}" > folder_name.txt
+          
+          # Sanitize the folder name for the archive (remove spaces, lowercase)
+          sanitized_folder_name=$(echo "${manga_folder}" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+          echo "${sanitized_folder_name}" > archive_name.txt
+          echo "Detected folder name: '${manga_folder}', Sanitized archive name: '${sanitized_folder_name}'"
+
+      - name: Archive Manga Folder
+        run: |
+          # Use the exact folder name in the `tar` command and the sanitized name for the archive
+          manga_folder=$(cat folder_name.txt)
+          archive_name=$(cat archive_name.txt)
+          echo "Archiving folder '${manga_folder}' to '${archive_name}.tar'"
+          tar -cf "${archive_name}.tar" -C manga "${manga_folder}"
+          echo "Archive created: ${archive_name}.tar"
+
+      - name: Upload to PixelDrain
+        env:
+          PIXELDRAIN_API: 0363d8ae-9303-4d7e-8fee-f5f09a4be198
+        run: |
+          # Define the pdup function to upload to PixelDrain and output two URL formats
+          pdup() {
+              [ -z "$1" ] && echo "Error: File not specified!" && return
+              ID=$(curl --progress-bar -T "$1" -u :${PIXELDRAIN_API} https://pixeldrain.com/api/file/ | grep -Po '(?<="id":")[^"]*')
+              echo "https://pixeldrain.com/u/$ID" > upload_link.txt
+              echo "https://pd.cybar.xyz/$ID" > custom_upload_link.txt
+          }
+          
+          # Run the pdup function with the archive file
+          archive_name=$(cat archive_name.txt)
+          pdup "${archive_name}.tar"
+
+      - name: Send Telegram Notification
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          current_index=$(cat last_index.txt)
+          archive_name=$(cat archive_name.txt)
+          upload_link=$(cat upload_link.txt)
+          custom_upload_link=$(cat custom_upload_link.txt)
+          message="Manga '${archive_name}' from index ${current_index} uploaded successfully.\n\nDownload links:\n1. ${upload_link}\n2. ${custom_upload_link}"
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" -d text="${message}"
+
+      - name: Commit Updated Index
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add last_index.txt
+          git commit -m "Update last processed index to $(cat last_index.txt)"
+          git push "https://${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" main
+
+      - name: Wait for Background Jobs
+        run: |
+          # Wait for any background jobs to complete before finishing
+          wait
+          
