@@ -1,0 +1,23 @@
+name: Auto-Trigger Workflow
+
+on:
+  workflow_run:
+    workflows: ["pd"]  # The name of the workflow to monitor
+    types:
+      - completed
+
+jobs:
+  check-and-trigger:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}  # Only run if last run was successful
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger 'pd' Workflow
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # Use the secret
+        run: |
+          curl -X POST -H "Authorization: token $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github.v3+json" \
+          https://api.github.com/repos/bzoomb/manga/actions/workflows/pd.yml/dispatches \
+          -d '{"ref":"main"}'
+          
