@@ -11,6 +11,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v2
 
+      - name: Clean
+        uses: AutoModality/action-clean@v1
+
       # Install and start a tmate session
       - name: Start Tmate session
         run: |
