@@ -67,6 +67,7 @@ jobs:
         id: download_manga
         run: |
           IFS=' ' read -ra URLS <<< "${{ steps.get_urls.outputs.urls }}"
+          current_index=${{ steps.determine_index.outputs.start_index }}
           for url in "${URLS[@]}"; do
             echo "Downloading manga from URL: $url"
             mangadex-dl "$url" --no-group-name -d manga --progress-bar-layout=none -wti
@@ -84,8 +85,10 @@ jobs:
               continue
             fi
             
-            echo "${sanitized_folder_name}.tar" >> archives_to_upload.txt
+            size=$(du -h "${sanitized_folder_name}.tar" | cut -f1)
+            echo "${manga_folder}|${sanitized_folder_name}.tar|${current_index}|${size}" >> archives_info.txt
             rm -rf manga
+            ((current_index++))
           done
 
       - name: Upload to PixelDrain
@@ -93,17 +96,16 @@ jobs:
         env:
           PIXELDRAIN_API: ${{ secrets.PIXELDRAIN_API }}
         run: |
-          while IFS= read -r archive; do
-            echo "Uploading $archive to PixelDrain"
-            ID=$(curl --progress-bar -T "$archive" -u :${PIXELDRAIN_API} https://pixeldrain.com/api/file/ | grep -Po '(?<="id":")[^"]*')
+          while IFS='|' read -r title filename index size; do
+            echo "Uploading $filename to PixelDrain"
+            ID=$(curl --progress-bar -T "$filename" -u :${PIXELDRAIN_API} https://pixeldrain.com/api/file/ | grep -Po '(?<="id":")[^"]*')
             if [ -n "$ID" ]; then
-              echo "https://pixeldrain.com/u/$ID" >> upload_links.txt
-              echo "https://pd.cybar.xyz/$ID" >> custom_upload_links.txt
+              echo "${title}|${filename}|${index}|${size}|https://pixeldrain.com/u/${ID}|https://pd.cybar.xyz/${ID}" >> upload_info.txt
             else
-              echo "Error: Failed to upload $archive to PixelDrain"
+              echo "Error: Failed to upload $filename to PixelDrain"
             fi
-            rm -f "$archive"
-          done < archives_to_upload.txt
+            rm -f "$filename"
+          done < archives_info.txt
 
       - name: Send Telegram Notification
         if: steps.get_urls.outputs.workflow_complete != 'true'
@@ -112,12 +114,19 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           message="🎉 Manga Upload Successful! 🎉\n\n"
-          while IFS= read -r link; do
-            message+="📥 PixelDrain: $link\n"
-          done < upload_links.txt
-          while IFS= read -r link; do
-            message+="📥 Custom: $link\n"
-          done < custom_upload_links.txt
+          while IFS='|' read -r title filename index size link1 link2; do
+            message+="Title: ${title}\n"
+            message+="File name: ${filename}\n"
+            message+="Index: ${index}\n"
+            message+="Size: ${size}\n"
+            message+="Link1: ${link1}\n"
+            message+="Link2: ${link2}\n\n"
+            message+="-----\n\n"
+          done < upload_info.txt
+          
+          current_time=$(date "+%Y-%m-%d %H:%M:%S")
+          message+="Workflow ended at ${current_time}"
+          
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" -d text="${message}" -d parse_mode="HTML"
 
       - name: Cleanup
@@ -125,9 +134,8 @@ jobs:
         run: |
           rm -rf manga
           rm -f *.tar
-          rm -f archives_to_upload.txt
-          rm -f upload_links.txt
-          rm -f custom_upload_links.txt
+          rm -f archives_info.txt
+          rm -f upload_info.txt
 
       - name: Check for Workflow Completion
         if: steps.get_urls.outputs.workflow_complete == 'true'
