@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 jobs:
-  download_and_upload:
+  process_manga:
     runs-on: ubuntu-latest
 
     steps:
@@ -62,18 +62,15 @@ jobs:
             echo "urls=${urls[*]}" >> $GITHUB_OUTPUT
           fi
 
-      
-      - name: Process Manga URLs
+      - name: Download Manga
         if: steps.get_urls.outputs.workflow_complete != 'true'
+        id: download_manga
         run: |
           IFS=' ' read -ra URLS <<< "${{ steps.get_urls.outputs.urls }}"
           for url in "${URLS[@]}"; do
-            echo "Processing URL: $url"
-            
-            # Download Manga
+            echo "Downloading manga from URL: $url"
             mangadex-dl "$url" --no-group-name -d manga --progress-bar-layout=none -wti
-      
-            # Determine Folder Name
+            
             manga_folder=$(ls manga)
             if [ -z "$manga_folder" ]; then
               echo "Error: No manga folder found for $url"
@@ -81,27 +78,33 @@ jobs:
             fi
             sanitized_folder_name=$(echo "${manga_folder}" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
             
-            # Archive Manga Folder
             echo "Archiving folder '${manga_folder}' to '${sanitized_folder_name}.tar'"
             if ! tar -cf "${sanitized_folder_name}.tar" -C manga "${manga_folder}"; then
               echo "Error: Failed to create archive for $url"
               continue
             fi
             
-            # Upload to PixelDrain
-            ID=$(curl --progress-bar -T "${sanitized_folder_name}.tar" -u :${PIXELDRAIN_API} https://pixeldrain.com/api/file/ | grep -Po '(?<="id":")[^"]*')
+            echo "${sanitized_folder_name}.tar" >> archives_to_upload.txt
+            rm -rf manga
+          done
+
+      - name: Upload to PixelDrain
+        if: steps.get_urls.outputs.workflow_complete != 'true'
+        env:
+          PIXELDRAIN_API: ${{ secrets.PIXELDRAIN_API }}
+        run: |
+          while IFS= read -r archive; do
+            echo "Uploading $archive to PixelDrain"
+            ID=$(curl --progress-bar -T "$archive" -u :${PIXELDRAIN_API} https://pixeldrain.com/api/file/ | grep -Po '(?<="id":")[^"]*')
             if [ -n "$ID" ]; then
               echo "https://pixeldrain.com/u/$ID" >> upload_links.txt
               echo "https://pd.cybar.xyz/$ID" >> custom_upload_links.txt
             else
-              echo "Error: Failed to upload file to PixelDrain for $url"
+              echo "Error: Failed to upload $archive to PixelDrain"
             fi
-            
-            # Cleanup
-            rm -rf manga
-            rm -f "${sanitized_folder_name}.tar"
-          done
-      
+            rm -f "$archive"
+          done < archives_to_upload.txt
+
       - name: Send Telegram Notification
         if: steps.get_urls.outputs.workflow_complete != 'true'
         env:
@@ -122,8 +125,11 @@ jobs:
         run: |
           rm -rf manga
           rm -f *.tar
+          rm -f archives_to_upload.txt
+          rm -f upload_links.txt
+          rm -f custom_upload_links.txt
 
       - name: Check for Workflow Completion
-        if: steps.get_url.outputs.workflow_complete == 'true'
+        if: steps.get_urls.outputs.workflow_complete == 'true'
         run: |
           echo "Workflow complete. All URLs processed."
