@@ -1,4 +1,4 @@
-name: custom2
+name: custom 2
 
 on:
   workflow_dispatch:
@@ -9,6 +9,10 @@ on:
         type: string
       index_range:
         description: 'Index range to process (e.g., 3-13)'
+        required: false
+        type: string
+      custom_url:
+        description: 'Custom URL to process (optional)'
         required: false
         type: string
 
@@ -27,10 +31,15 @@ jobs:
         run: |
           pip install mangadex-downloader
 
-      - name: Determine Indices
+      - name: Determine Indices and URL
         id: determine_indices
         run: |
-          if [[ -n "${{ github.event.inputs.single_index }}" ]]; then
+          if [[ -n "${{ github.event.inputs.custom_url }}" ]]; then
+            echo "use_custom_url=true" >> $GITHUB_OUTPUT
+            echo "custom_url=${{ github.event.inputs.custom_url }}" >> $GITHUB_OUTPUT
+            echo "start_index=1" >> $GITHUB_OUTPUT
+            echo "end_index=1" >> $GITHUB_OUTPUT
+          elif [[ -n "${{ github.event.inputs.single_index }}" ]]; then
             echo "is_range=false" >> $GITHUB_OUTPUT
             echo "start_index=${{ github.event.inputs.single_index }}" >> $GITHUB_OUTPUT
             echo "end_index=${{ github.event.inputs.single_index }}" >> $GITHUB_OUTPUT
@@ -56,30 +65,26 @@ jobs:
         run: |
           start_index=${{ steps.determine_indices.outputs.start_index }}
           end_index=${{ steps.determine_indices.outputs.end_index }}
-          echo "Start index: $start_index"
-          echo "End index: $end_index"
+          use_custom_url=${{ steps.determine_indices.outputs.use_custom_url }}
+          custom_url=${{ steps.determine_indices.outputs.custom_url }}
           
-          for ((i=start_index; i<=end_index; i++)); do
-            url=$(sed -n "${i}p" manga.txt)
-            if [[ -z "$url" ]]; then
-              echo "No URL found at line ${i}. Stopping."
-              break
-            fi
-            
+          process_url() {
+            local url="$1"
+            local index="$2"
             echo "Processing manga from URL: $url"
             mangadex-dl "$url" --no-group-name -d manga --progress-bar-layout=none -wti
             
             manga_folder=$(ls manga)
             if [ -z "$manga_folder" ]; then
               echo "Error: No manga folder found for $url"
-              continue
+              return
             fi
             sanitized_folder_name=$(echo "${manga_folder}" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
             
             echo "Archiving folder '${manga_folder}' to '${sanitized_folder_name}.tar'"
             if ! tar -cf "${sanitized_folder_name}.tar" -C manga "${manga_folder}"; then
               echo "Error: Failed to create archive for $url"
-              continue
+              return
             fi
             
             size=$(du -h "${sanitized_folder_name}.tar" | cut -f1)
@@ -87,13 +92,26 @@ jobs:
             echo "Uploading ${sanitized_folder_name}.tar to PixelDrain"
             ID=$(curl --progress-bar -T "${sanitized_folder_name}.tar" -u :${PIXELDRAIN_API} https://pixeldrain.com/api/file/ | grep -Po '(?<="id":")[^"]*')
             if [ -n "$ID" ]; then
-              echo "${manga_folder}|${sanitized_folder_name}.tar|${i}|${size}|https://pixeldrain.com/u/${ID}|https://pd.cybar.xyz/${ID}" >> upload_info.txt
+              echo "${manga_folder}|${sanitized_folder_name}.tar|${index}|${size}|https://pixeldrain.com/u/${ID}|https://pd.cybar.xyz/${ID}" >> upload_info.txt
             else
               echo "Error: Failed to upload ${sanitized_folder_name}.tar to PixelDrain"
             fi
             
             rm -rf manga "${sanitized_folder_name}.tar"
-          done
+          }
+          
+          if [ "$use_custom_url" = "true" ]; then
+            process_url "$custom_url" "custom"
+          else
+            for ((i=start_index; i<=end_index; i++)); do
+              url=$(sed -n "${i}p" manga.txt)
+              if [[ -z "$url" ]]; then
+                echo "No URL found at line ${i}. Stopping."
+                break
+              fi
+              process_url "$url" "$i"
+            done
+          fi
           
           if [ ! -f upload_info.txt ]; then
             echo "workflow_complete=true" >> $GITHUB_OUTPUT
