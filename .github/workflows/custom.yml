@@ -137,7 +137,7 @@ jobs:
             echo
           done < upload_info.txt)
           
-          Workflow ended at $(TZ='Asia/Jakarta' date "+%Y-%m-%d %H:%M:%S %Z")
+          Workflow finished at $(TZ='Asia/Jakarta' date "+%d-%m-%Y %H:%M:%S %Z")
           EOF
 
           # Send the message
