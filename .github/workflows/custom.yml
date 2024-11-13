@@ -45,8 +45,71 @@ jobs:
             echo "start_index=1" >> $GITHUB_OUTPUT
             echo "end_index=1" >> $GITHUB_OUTPUT
           fi
-
-      # ... (rest of the steps remain the same until the Send Telegram Notification step)
+          
+      - name: Get URLs
+        id: get_urls
+        run: |
+          start_index=${{ steps.determine_index.outputs.start_index }}
+          end_index=${{ steps.determine_index.outputs.end_index }}
+          urls=()
+          for ((i=start_index; i<=end_index; i++)); do
+            url=$(sed -n "${i}p" manga.txt)
+            if [[ -z "$url" ]]; then
+              echo "No URL found at line ${i}. Stopping."
+              break
+            fi
+            urls+=("$url")
+          done
+          if [[ ${#urls[@]} -eq 0 ]]; then
+            echo "workflow_complete=true" >> $GITHUB_OUTPUT
+          else
+            echo "urls=${urls[*]}" >> $GITHUB_OUTPUT
+          fi
+          
+      - name: Download Manga
+        if: steps.get_urls.outputs.workflow_complete != 'true'
+        id: download_manga
+        run: |
+          IFS=' ' read -ra URLS <<< "${{ steps.get_urls.outputs.urls }}"
+          current_index=${{ steps.determine_index.outputs.start_index }}
+          for url in "${URLS[@]}"; do
+            echo "Downloading manga from URL: $url"
+            mangadex-dl "$url" --no-group-name -d manga --progress-bar-layout=none -wti
+            
+            manga_folder=$(ls manga)
+            if [ -z "$manga_folder" ]; then
+              echo "Error: No manga folder found for $url"
+              continue
+            fi
+            sanitized_folder_name=$(echo "${manga_folder}" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+            
+            echo "Archiving folder '${manga_folder}' to '${sanitized_folder_name}.tar'"
+            if ! tar -cf "${sanitized_folder_name}.tar" -C manga "${manga_folder}"; then
+              echo "Error: Failed to create archive for $url"
+              continue
+            fi
+            
+            size=$(du -h "${sanitized_folder_name}.tar" | cut -f1)
+            echo "${manga_folder}|${sanitized_folder_name}.tar|${current_index}|${size}" >> archives_info.txt
+            rm -rf manga
+            ((current_index++))
+          done
+          
+      - name: Upload to PixelDrain
+        if: steps.get_urls.outputs.workflow_complete != 'true'
+        env:
+          PIXELDRAIN_API: ${{ secrets.PIXELDRAIN_API }}
+        run: |
+          while IFS='|' read -r title filename index size; do
+            echo "Uploading $filename to PixelDrain"
+            ID=$(curl --progress-bar -T "$filename" -u :${PIXELDRAIN_API} https://pixeldrain.com/api/file/ | grep -Po '(?<="id":")[^"]*')
+            if [ -n "$ID" ]; then
+              echo "${title}|${filename}|${index}|${size}|https://pixeldrain.com/u/${ID}|https://pd.cybar.xyz/${ID}" >> upload_info.txt
+            else
+              echo "Error: Failed to upload $filename to PixelDrain"
+            fi
+            rm -f "$filename"
+          done < archives_info.txt
 
       - name: Send Telegram Notification
         if: steps.get_urls.outputs.workflow_complete != 'true'
