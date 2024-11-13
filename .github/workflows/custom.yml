@@ -22,7 +22,6 @@ jobs:
       - name: Install dependencies
         run: |
           pip install mangadex-downloader
-          sudo apt-get install -y rclone jq
 
       - name: Determine Starting Index
         id: determine_index
@@ -116,6 +115,8 @@ jobs:
           # Create the message content
           cat << EOF > message.txt
           Manga Upload Successful!
+
+          -----
 
           $(while IFS='|' read -r title filename index size link1 link2; do
             echo "Title: ${title}"
