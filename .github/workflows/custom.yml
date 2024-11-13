@@ -45,12 +45,14 @@ jobs:
             echo "start_index=1" >> $GITHUB_OUTPUT
             echo "end_index=1" >> $GITHUB_OUTPUT
           fi
-          
+
       - name: Get URLs
         id: get_urls
         run: |
-          start_index=${{ steps.determine_index.outputs.start_index }}
-          end_index=${{ steps.determine_index.outputs.end_index }}
+          start_index=${{ steps.determine_indices.outputs.start_index }}
+          end_index=${{ steps.determine_indices.outputs.end_index }}
+          echo "Start index: $start_index"
+          echo "End index: $end_index"
           urls=()
           for ((i=start_index; i<=end_index; i++)); do
             url=$(sed -n "${i}p" manga.txt)
@@ -65,13 +67,13 @@ jobs:
           else
             echo "urls=${urls[*]}" >> $GITHUB_OUTPUT
           fi
-          
+
       - name: Download Manga
         if: steps.get_urls.outputs.workflow_complete != 'true'
         id: download_manga
         run: |
           IFS=' ' read -ra URLS <<< "${{ steps.get_urls.outputs.urls }}"
-          current_index=${{ steps.determine_index.outputs.start_index }}
+          current_index=${{ steps.determine_indices.outputs.start_index }}
           for url in "${URLS[@]}"; do
             echo "Downloading manga from URL: $url"
             mangadex-dl "$url" --no-group-name -d manga --progress-bar-layout=none -wti
