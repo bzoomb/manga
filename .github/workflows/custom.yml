@@ -31,20 +31,23 @@ jobs:
         id: determine_indices
         run: |
           if [[ -n "${{ github.event.inputs.single_index }}" ]]; then
+            echo "is_range=false" >> $GITHUB_OUTPUT
             echo "start_index=${{ github.event.inputs.single_index }}" >> $GITHUB_OUTPUT
             echo "end_index=${{ github.event.inputs.single_index }}" >> $GITHUB_OUTPUT
           elif [[ -n "${{ github.event.inputs.index_range }}" ]]; then
+            echo "is_range=true" >> $GITHUB_OUTPUT
             IFS='-' read -ra RANGE <<< "${{ github.event.inputs.index_range }}"
             echo "start_index=${RANGE[0]}" >> $GITHUB_OUTPUT
             echo "end_index=${RANGE[1]}" >> $GITHUB_OUTPUT
-          elif [[ -f last_index.txt ]]; then
-            last_index=$(cat last_index.txt)
-            echo "start_index=$((last_index + 1))" >> $GITHUB_OUTPUT
-            echo "end_index=$((last_index + 1))" >> $GITHUB_OUTPUT
           else
+            echo "is_range=false" >> $GITHUB_OUTPUT
             echo "start_index=1" >> $GITHUB_OUTPUT
             echo "end_index=1" >> $GITHUB_OUTPUT
           fi
+
+      - name: Use slimhub_actions for range processing
+        if: steps.determine_indices.outputs.is_range == 'true'
+        uses: rokibhasansagar/slimhub_actions@main          
 
       - name: Get URLs
         id: get_urls
