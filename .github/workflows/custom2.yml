@@ -1,4 +1,4 @@
-name: custom 2
+name: Manga Downloader
 
 on:
   workflow_dispatch:
@@ -142,13 +142,25 @@ jobs:
           minutes=$(( (duration % 3600) / 60 ))
           seconds=$((duration % 60))
           
+          # Determine which input was used
+          if [ -n "${{ github.event.inputs.single_index }}" ]; then
+            input_used="Single index: ${{ github.event.inputs.single_index }}"
+          elif [ -n "${{ github.event.inputs.index_range }}" ]; then
+            input_used="Index range: ${{ github.event.inputs.index_range }}"
+          elif [ -n "${{ github.event.inputs.custom_url }}" ]; then
+            input_used="Custom URL: ${{ github.event.inputs.custom_url }}"
+          else
+            input_used="No input provided"
+          fi
+          
           if [ "$status" = "success" ]; then
             message="✅ Manga Upload Successful!\n\n"
             message+="Workflow duration: ${hours}h ${minutes}m ${seconds}s\n\n"
+            message+="Input: ${input_used}\n\n"
             message+="-----\n\n"
             while IFS='|' read -r title filename index size link1 link2; do
               message+="Title: ${title}\n"
-              message+="File name: ${filename}\n"
+              message+="File: ${filename}\n"
               message+="Index: ${index}\n"
               message+="Size: ${size}\n"
               message+="Link1: ${link1}\n"
@@ -158,6 +170,7 @@ jobs:
           else
             message="❌ Workflow Failed!\n\n"
             message+="Workflow duration: ${hours}h ${minutes}m ${seconds}s\n\n"
+            message+="Input: ${input_used}\n\n"
             
             # Check if failure is due to no space left
             if grep -q "no space left on device" <<< "${{ job.status }}"; then
