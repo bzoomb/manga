@@ -1,0 +1,127 @@
+name: custom2
+
+on:
+  workflow_dispatch:
+    inputs:
+      single_index:
+        description: 'Single index to process (e.g., 5)'
+        required: false
+        type: string
+      index_range:
+        description: 'Index range to process (e.g., 3-13)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  process_manga:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          pip install mangadex-downloader
+
+      - name: Determine Indices
+        id: determine_indices
+        run: |
+          if [[ -n "${{ github.event.inputs.single_index }}" ]]; then
+            echo "is_range=false" >> $GITHUB_OUTPUT
+            echo "start_index=${{ github.event.inputs.single_index }}" >> $GITHUB_OUTPUT
+            echo "end_index=${{ github.event.inputs.single_index }}" >> $GITHUB_OUTPUT
+          elif [[ -n "${{ github.event.inputs.index_range }}" ]]; then
+            echo "is_range=true" >> $GITHUB_OUTPUT
+            IFS='-' read -ra RANGE <<< "${{ github.event.inputs.index_range }}"
+            echo "start_index=${RANGE[0]}" >> $GITHUB_OUTPUT
+            echo "end_index=${RANGE[1]}" >> $GITHUB_OUTPUT
+          else
+            echo "is_range=false" >> $GITHUB_OUTPUT
+            echo "start_index=1" >> $GITHUB_OUTPUT
+            echo "end_index=1" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Use slimhub_actions for range processing
+        if: steps.determine_indices.outputs.is_range == 'true'
+        uses: rokibhasansagar/slimhub_actions@main
+
+      - name: Process Manga
+        id: process_manga
+        env:
+          PIXELDRAIN_API: ${{ secrets.PIXELDRAIN_API }}
+        run: |
+          start_index=${{ steps.determine_indices.outputs.start_index }}
+          end_index=${{ steps.determine_indices.outputs.end_index }}
+          echo "Start index: $start_index"
+          echo "End index: $end_index"
+          
+          for ((i=start_index; i<=end_index; i++)); do
+            url=$(sed -n "${i}p" manga.txt)
+            if [[ -z "$url" ]]; then
+              echo "No URL found at line ${i}. Stopping."
+              break
+            fi
+            
+            echo "Processing manga from URL: $url"
+            mangadex-dl "$url" --no-group-name -d manga --progress-bar-layout=none -wti
+            
+            manga_folder=$(ls manga)
+            if [ -z "$manga_folder" ]; then
+              echo "Error: No manga folder found for $url"
+              continue
+            fi
+            sanitized_folder_name=$(echo "${manga_folder}" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+            
+            echo "Archiving folder '${manga_folder}' to '${sanitized_folder_name}.tar'"
+            if ! tar -cf "${sanitized_folder_name}.tar" -C manga "${manga_folder}"; then
+              echo "Error: Failed to create archive for $url"
+              continue
+            fi
+            
+            size=$(du -h "${sanitized_folder_name}.tar" | cut -f1)
+            
+            echo "Uploading ${sanitized_folder_name}.tar to PixelDrain"
+            ID=$(curl --progress-bar -T "${sanitized_folder_name}.tar" -u :${PIXELDRAIN_API} https://pixeldrain.com/api/file/ | grep -Po '(?<="id":")[^"]*')
+            if [ -n "$ID" ]; then
+              echo "${manga_folder}|${sanitized_folder_name}.tar|${i}|${size}|https://pixeldrain.com/u/${ID}|https://pd.cybar.xyz/${ID}" >> upload_info.txt
+            else
+              echo "Error: Failed to upload ${sanitized_folder_name}.tar to PixelDrain"
+            fi
+            
+            rm -rf manga "${sanitized_folder_name}.tar"
+          done
+          
+          if [ ! -f upload_info.txt ]; then
+            echo "workflow_complete=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Telegram Notification
+        if: steps.process_manga.outputs.workflow_complete != 'true'
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          message="Manga Upload Successful!\n\n-----\n\n"
+          while IFS='|' read -r title filename index size link1 link2; do
+            message+="Title: ${title}\n"
+            message+="File name: ${filename}\n"
+            message+="Index: ${index}\n"
+            message+="Size: ${size}\n"
+            message+="Link1: ${link1}\n"
+            message+="Link2: ${link2}\n\n"
+            message+="-----\n\n"
+          done < upload_info.txt
+          message+="Workflow finished at $(TZ='Asia/Jakarta' date '+%d-%m-%Y %H:%M:%S %Z')"
+          
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+               -H "Content-Type: application/json" \
+               -d "{\"chat_id\": \"${TELEGRAM_CHAT_ID}\", \"text\": \"${message}\", \"parse_mode\": \"HTML\"}"
