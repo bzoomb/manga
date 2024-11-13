@@ -22,6 +22,7 @@ permissions:
 jobs:
   process_manga:
     runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.single_index != '' || github.event.inputs.index_range != '' || github.event.inputs.custom_url != '' }}
 
     steps:
       - name: Checkout repository
