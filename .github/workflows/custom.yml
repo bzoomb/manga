@@ -114,19 +114,19 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           message="Manga Upload Successful!
-
-"
-          while IFS='|' read -r title filename index size link1 link2; do
-            message+="Title: ${title}
-File name: ${filename}
-Index: ${index}
-Size: ${size}
-Link1: ${link1}
-Link2: ${link2}
-
------
-
-"
+          
+          "
+                    while IFS='|' read -r title filename index size link1 link2; do
+                      message+="Title: ${title}
+          File name: ${filename}
+          Index: ${index}
+          Size: ${size}
+          Link1: ${link1}
+          Link2: ${link2}
+          
+          -----
+          
+          "
           done < upload_info.txt
           
           current_time=$(date "+%Y-%m-%d %H:%M:%S")
@@ -138,8 +138,8 @@ Link2: ${link2}
                -d parse_mode="HTML" \
                -d @- <<EOF
           {"text": $(jq -Rs . <<< "$message")}
-EOF
-
+          EOF
+          
       - name: Cleanup
         if: always()
         run: |
