@@ -57,7 +57,10 @@ jobs:
       - name: Use slimhub_actions for range processing
         if: steps.determine_indices.outputs.is_range == 'true'
         uses: rokibhasansagar/slimhub_actions@main
-          
+
+      - name: Get start time
+        run: echo "start_time=$(date +%s)" >> $GITHUB_ENV        
+                  
       - name: Process Manga
         id: process_manga
         env:
@@ -117,22 +120,54 @@ jobs:
             echo "workflow_complete=true" >> $GITHUB_OUTPUT
           fi
 
+      - name: Calculate duration
+        if: always()
+        run: |
+          end_time=$(date +%s)
+          duration=$((end_time - ${{ env.start_time }}))
+          echo "workflow_duration=$duration" >> $GITHUB_ENV
+
       - name: Send Telegram Notification
-        if: steps.process_manga.outputs.workflow_complete != 'true'
+        if: always()
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          message="Manga Upload Successful!\n\n-----\n\n"
-          while IFS='|' read -r title filename index size link1 link2; do
-            message+="Title: ${title}\n"
-            message+="File name: ${filename}\n"
-            message+="Index: ${index}\n"
-            message+="Size: ${size}\n"
-            message+="Link1: ${link1}\n"
-            message+="Link2: ${link2}\n\n"
+          status="${{ job.status }}"
+          duration="${{ env.workflow_duration }}"
+          
+          # Convert duration to a more readable format
+          hours=$((duration / 3600))
+          minutes=$(( (duration % 3600) / 60 ))
+          seconds=$((duration % 60))
+          
+          if [ "$status" = "success" ]; then
+            message="✅ Manga Upload Successful!\n\n"
+            message+="Workflow duration: ${hours}h ${minutes}m ${seconds}s\n\n"
             message+="-----\n\n"
-          done < upload_info.txt
+            while IFS='|' read -r title filename index size link1 link2; do
+              message+="Title: ${title}\n"
+              message+="File name: ${filename}\n"
+              message+="Index: ${index}\n"
+              message+="Size: ${size}\n"
+              message+="Link1: ${link1}\n"
+              message+="Link2: ${link2}\n\n"
+              message+="-----\n\n"
+            done < upload_info.txt
+          else
+            message="❌ Workflow Failed!\n\n"
+            message+="Workflow duration: ${hours}h ${minutes}m ${seconds}s\n\n"
+            
+            # Check if failure is due to no space left
+            if grep -q "no space left on device" <<< "${{ job.status }}"; then
+              message+="Error: No space left on device\n\n"
+              message+="Disk usage:\n"
+              message+="$(du -sh -- * | sort -rh)\n\n"
+            else
+              message+="Please check the workflow logs for more information.\n\n"
+            fi
+          fi
+          
           message+="Workflow finished at $(TZ='Asia/Jakarta' date '+%d-%m-%Y %H:%M:%S %Z')"
           
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
