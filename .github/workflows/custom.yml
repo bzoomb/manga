@@ -22,7 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install mangadex-downloader
-          sudo apt-get install -y rclone
+          sudo apt-get install -y rclone jq
 
       - name: Determine Starting Index
         id: determine_index
@@ -113,21 +113,32 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
-          message="🎉 Manga Upload Successful! 🎉\n\n"
+          message="Manga Upload Successful!
+
+"
           while IFS='|' read -r title filename index size link1 link2; do
-            message+="Title: ${title}\n"
-            message+="File name: ${filename}\n"
-            message+="Index: ${index}\n"
-            message+="Size: ${size}\n"
-            message+="Link1: ${link1}\n"
-            message+="Link2: ${link2}\n\n"
-            message+="-----\n\n"
+            message+="Title: ${title}
+File name: ${filename}
+Index: ${index}
+Size: ${size}
+Link1: ${link1}
+Link2: ${link2}
+
+-----
+
+"
           done < upload_info.txt
           
           current_time=$(date "+%Y-%m-%d %H:%M:%S")
           message+="Workflow ended at ${current_time}"
           
-          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" -d chat_id="${TELEGRAM_CHAT_ID}" -d text="${message}" -d parse_mode="HTML"
+          # Use -d @- to read the message from stdin, which preserves newlines
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+               -d chat_id="${TELEGRAM_CHAT_ID}" \
+               -d parse_mode="HTML" \
+               -d @- <<EOF
+          {"text": $(jq -Rs . <<< "$message")}
+EOF
 
       - name: Cleanup
         if: always()
