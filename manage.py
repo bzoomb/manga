@@ -9,7 +9,7 @@ REPO_NAME = "manga"
 WORKFLOW_ID = "main.yml"  # Replace with your actual workflow file name
 
 # Define your GitHub token as a variable
-GITHUB_TOKEN = "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"  # Replace with your actual token
+GITHUB_TOKEN = ""  # Replace with your actual token
 
 # Headers for GitHub API requests
 HEADERS = {
